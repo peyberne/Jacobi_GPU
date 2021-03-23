@@ -9,7 +9,9 @@ program jacobi
 use cudafor
 use jacobi_cufor
 #endif
-
+#ifdef BW
+use bw_cufor
+#endif
   implicit none
 
   integer,  parameter :: iter_max = 10
@@ -30,8 +32,34 @@ use jacobi_cufor
   real(dp) :: rate
   integer(di)  :: startc, endc
   logical :: isDevice
+#ifdef BW
+  real(dp), managed :: AA(N*N)
+  real(dp), managed :: BB(N*N)
+  real(dp), managed :: CC(N*N)
+  real(dp) :: rnd
+#endif
+
 
   call system_clock(count_rate=rate)
+
+#ifdef BW
+  rnd=3.42
+  AA(1)=0.12
+  BB(1)=0.23
+  do i=2,N*N
+     AA(i)= AA(i-1)+0.000342
+     BB(i)= 2.1*AA(i)/1.3
+  end do
+  call system_clock(startc)
+  do iterk=1,iter_max
+     call BWdevice<<<(N*N+256-1)/256,256>>>(AA, BB, CC, N*N)
+  enddo
+  istat = cudaDeviceSynchronize()
+  call system_clock(endc)
+  write(*,*) "Bandwidth in GBytes/s: ", iter_max*N*N*24.*real(endc-startc, dp)/rate/1000000000.
+#endif
+
+
 
   allocate(A(N, N))
   allocate(Anew(N, N))

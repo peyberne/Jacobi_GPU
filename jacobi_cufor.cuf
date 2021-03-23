@@ -12,9 +12,7 @@ module jacobi_cufor
       index = blockDim%x*(blockIdx%x-1)+threadIdx%x
       ind1=xindex(index,N)
       ind2=yindex(index,N)
-      d1=disp(1,0,N)
-      d2=disp(0,1,N)
-      if (index<(N*N-d2).AND.index>d2.AND.(ind1.NE.0).AND.(ind1.NE.1)) then
+      if ((ind2.NE.1).AND.(ind2.NE.N).AND.(ind1.NE.1).AND.(ind1.NE.N)) then
          Anew_cufor(ind1,ind2) = A_cufor(ind1,ind2-1) + A_cufor(ind1,ind2+1) + A_cufor(ind1-1,ind2) + A_cufor(ind1+1,ind2)
          Anew_cufor(ind1,ind2) = Anew_cufor(ind1,ind2) * 0.25
       endif
@@ -42,7 +40,7 @@ module jacobi_cufor
 
   attributes(device) function xindex(index,nx)
   integer :: index,nx
-  xindex=mod(index,nx)
+  xindex=mod(index-1,nx)+1
   end function
 
   attributes(device) function yindex(index,nx)
