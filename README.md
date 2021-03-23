@@ -9,3 +9,7 @@ make
 make Jacobi_offload
 ./Jacobi_offload
 
+# to compile run CUDA FORTRAN with or without Offload implementation:
+make Jacobi_cudafor
+./Jacobi_cudafor
+
