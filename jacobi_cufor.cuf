@@ -1,0 +1,58 @@
+module jacobi_cufor
+  use cudafor
+  use iso_fortran_env, only: di=>int64, dp=>real64
+  contains
+
+  attributes(global) subroutine jacobiDevice(A_cufor,Anew_cufor,N)
+      integer, value     :: N
+      real(dp), managed  :: A_cufor(N,N)
+      real(dp), managed  :: Anew_cufor(N,N)
+      integer            :: index,ind1,d1,d2,i,j
+       
+      index = blockDim%x*(blockIdx%x-1)+threadIdx%x
+      ind1=xindex(index,N)
+      ind2=yindex(index,N)
+      d1=disp(1,0,N)
+      d2=disp(0,1,N)
+      if (index<(N*N-d2).AND.index>d2.AND.(ind1.NE.0).AND.(ind1.NE.1)) then
+         Anew_cufor(ind1,ind2) = A_cufor(ind1,ind2-1) + A_cufor(ind1,ind2+1) + A_cufor(ind1-1,ind2) + A_cufor(ind1+1,ind2)
+         Anew_cufor(ind1,ind2) = Anew_cufor(ind1,ind2) * 0.25
+      endif
+
+  end subroutine
+
+  attributes(global) subroutine setValuesDevice(A_cufor,Anew_cufor,N)
+      integer, value     :: N
+      real(dp), managed  :: A_cufor(N,N)
+      real(dp), managed  :: Anew_cufor(N,N)
+      integer            :: index
+      
+       
+      index = blockDim%x*(blockIdx%x-1)+threadIdx%x
+      ind1=xindex(index,N)
+      ind2=yindex(index,N)
+      d1=disp(1,0,N)
+      d2=disp(0,1,N)
+      if (index<(N*N-d2).AND.index>d2.AND.(ind1.NE.0).AND.(ind1.NE.1)) then
+         A_cufor(ind1,ind2) = Anew_cufor(ind1,ind2)
+      endif
+
+  end subroutine
+
+
+  attributes(device) function xindex(index,nx)
+  integer :: index,nx
+  xindex=mod(index,nx)
+  end function
+
+  attributes(device) function yindex(index,nx)
+  integer :: index,nx
+  yindex=(index-1)/nx+1
+  end function
+
+  attributes(device) function disp(i,j,nx)
+  integer :: i,j,nx
+  disp=i+j*nx
+  end function
+
+end module 
