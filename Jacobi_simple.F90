@@ -12,67 +12,46 @@ use jacobi_cufor
 
   implicit none
 
-  integer,  parameter :: iter_max = 160
+  integer,  parameter :: iter_max = 10
   integer,  parameter :: N = 8*1024
-  integer             ::  i, j,iterk,istat
+  integer             ::  i,j,iterk,istat
   real(dp), parameter :: tol = 1.0e-2_dp
   
-  real(dp), allocatable :: A(:, :), Anew(:, :)
-  real(dp), allocatable,target :: A_omp(:, :), Anew_omp(:, :)
-  real(dp), pointer, save :: A_cuda(:,:), Anew_cuda(:,:)
-  real(dp), allocatable, target :: A_opt(:, :), Anew_opt(:, :)
-  real(dp), pointer     :: A_pointer1(:,:)
-  real(dp), pointer     :: A_pointer2(:,:)
+  real(dp), allocatable,target  :: A(:, :), Anew(:, :)
+  real(dp), allocatable,target  :: A_omp(:, :), Anew_omp(:, :)
+  real(dp), pointer, save       :: A_cuda(:,:), Anew_cuda(:,:)
+  real(dp), pointer             :: A_pointer1(:,:)
+  real(dp), pointer             :: A_pointer2(:,:)
 #ifdef CUDAFOR
-  real(dp), allocatable,managed           :: A_cufor(:, :), Anew_cufor(:, :)
+  real(dp), allocatable,managed :: A_cufor(:, :), Anew_cufor(:, :)
   integer, parameter :: threadsPerBlock=256
   integer :: numBlocks
 #endif
   real(dp) :: rate
   integer(di)  :: startc, endc
   logical :: isDevice
-!!$omp declare target(jacobi_offload_opt,swap)
 
   call system_clock(count_rate=rate)
 
   allocate(A(N, N))
   allocate(Anew(N, N))
 
-! Jacobi on CPU 
+! Jacobi on CPU
   call init_array(A, N, 7.0_dp)
-  call system_clock(startc)
-  call jacobi_CPU(A, Anew, N, tol, iter_max)
-  call system_clock(endc)
-  write(*,*) "timing for Jacobi CPU: ", real(endc-startc, dp)/rate*1000, "ms"
-! Jacobi on CPU OPTIMIZED
-  allocate(A_opt(N, N))
-  allocate(Anew_opt(N, N))
-  call init_array(A_opt, N, 7.0_dp)
-  call init_array(Anew_opt, N, 7.0_dp)
-  A_pointer1 => A_opt
-  A_pointer2 => Anew_opt
+  call init_array(Anew, N, 7.0_dp)
+  A_pointer1 => A
+  A_pointer2 => Anew
   call system_clock(startc)
   do iterk=1,iter_max
-     call jacobi_CPU_opt(A_pointer1, A_pointer2, N)
+     call jacobi_CPU(A_pointer1, A_pointer2, N)
      call swap(A_pointer1,A_pointer2)
    enddo
   call system_clock(endc)
-  write(*,*) "timing for Jacobi CPU optimized: ", real(endc-startc, dp)/rate*1000, "ms"
-  call test_array(A_opt,A,N)
+  write(*,*) "timing for Jacobi CPU: ", real(endc-startc, dp)/rate*1000, "ms"
 ! Jacobi in cuda
 #ifdef CUDA
   call gbs_allocate_cuda(A_cuda,1,N,1,N)  
   call gbs_allocate_cuda(Anew_cuda,1,N,1,N)    
-  call init_array_cuda(A_cuda, N, 7.0_dp)
-  call system_clock(startc)
-  do iterk=1,iter_max
-     CALL jacobi_cuda(A_cuda,Anew_cuda,N,N)
-  enddo
-  CALL synchronize_cuda_device()
-  call system_clock(endc)
-  write(*,*) "timing for Jacobi GPUcuda: ", real(endc-startc, dp)/rate*1000, "ms"
-  call test_array_cuda(A_cuda,A,N)
-! Jacobi in cuda optimized
   call init_array_cuda(A_cuda, N, 7.0_dp)
   call init_array_cuda(Anew_cuda, N, 7.0_dp)
   call system_clock(startc)
@@ -85,7 +64,7 @@ use jacobi_cufor
   enddo
   CALL synchronize_cuda_device()
   call system_clock(endc)
-  write(*,*) "timing for Jacobi GPUcuda optimized: ", real(endc-startc, dp)/rate*1000, "ms"
+  write(*,*) "timing for Jacobi GPU cuda: ", real(endc-startc, dp)/rate*1000, "ms"
   call test_array_cuda(A_cuda,A,N)
 #endif
 !
@@ -94,34 +73,27 @@ use jacobi_cufor
   allocate(Anew_omp(N, N))
 ! Jacobi openmp 
   call init_array(A_omp, N, 7.0_dp)
+  call init_array(Anew_omp, N, 7.0_dp)
   call system_clock(startc)
   call jacobi_openmp(A_omp, Anew_omp, N, tol, iter_max)
   call system_clock(endc)
-  write(*,*) "timing for Jacobi CPUopenmp: ", real(endc-startc, dp)/rate*1000, "ms"
-  call test_array(A_omp,A,N)
-! Jacobi openmp optimized
-  call init_array(A_omp, N, 7.0_dp)
-  call init_array(Anew_omp, N, 7.0_dp)
-  call system_clock(startc)
-  call jacobi_openmp_opt(A_omp, Anew_omp, N, tol, iter_max)
-  call system_clock(endc)
-  write(*,*) "timing for Jacobi CPUopenmp optimized: ", real(endc-startc, dp)/rate*1000, "ms"
+  write(*,*) "timing for Jacobi CPU openmp: ", real(endc-startc, dp)/rate*1000, "ms"
   call test_array(A_omp,A,N)
 
-! Jacobi openmp offload optimized
+! Jacobi openmp offload
   call init_array(A_omp, N, 7.0_dp)
   call init_array(Anew_omp, N, 7.0_dp)
   A_pointer1 => A_omp
   A_pointer2 => Anew_omp
-!$omp target enter data map(to: A_omp, Anew_omp)
+  !$omp target enter data map(to: A_omp, Anew_omp)
   call system_clock(startc)
   do iterk=1,iter_max
-     call jacobi_offload_opt(A_pointer1, A_pointer2, N)
+     call jacobi_offload(A_pointer1, A_pointer2, N)
      call swap(A_pointer1,A_pointer2)
   enddo
   call system_clock(endc)
-  write(*,*) "timing for Jacobi GPUopenmp optimized: ", real(endc-startc, dp)/rate*1000, "ms"
-!$omp target update from(A_omp)  
+  write(*,*) "timing for Jacobi GPU openmp: ", real(endc-startc, dp)/rate*1000, "ms"
+  !$omp target update from(A_omp)  
   call test_array(A_omp,A,N)
 #endif
 !
@@ -129,21 +101,6 @@ use jacobi_cufor
 #ifdef CUDAFOR
   allocate(A_cufor(N,N))
   allocate(Anew_cufor(N,N))
-  call init_array(A_cufor, N, 7.0_dp)
-  call init_array(Anew_cufor, N, 7.0_dp)
-  numBlocks=((N*N+threadsPerBlock-1)/threadsPerBlock)
-  call system_clock(startc)
-  do iterk=1,iter_max
-     call jacobiDevice<<<numBlocks,threadsPerBlock>>>(A_cufor, Anew_cufor, N)
-     call setValuesDevice<<<numBlocks,threadsPerBlock>>>(A_cufor, Anew_cufor, N)
-!     call jacobiglobal<<<numBlocks,threadsPerBlock>>>(A_cufor, Anew_cufor, N)
-  enddo
-  istat = cudaDeviceSynchronize()
-  call system_clock(endc)
-  write(*,*) "timing for Jacobi GPU CUDAFOR: ", real(endc-startc, dp)/rate*1000, "ms"
-  call test_array(A_cufor,A,N)
-
-! Jacobi cudafor optimized
   call init_array(A_cufor, N, 7.0_dp)
   call init_array(Anew_cufor, N, 7.0_dp)
   numBlocks=((N*N+threadsPerBlock-1)/threadsPerBlock)
@@ -157,7 +114,7 @@ use jacobi_cufor
   enddo
   istat = cudaDeviceSynchronize()
   call system_clock(endc)
-  write(*,*) "timing for Jacobi GPU CUDAFOR optimized: ", real(endc-startc, dp)/rate*1000, "ms"
+  write(*,*) "timing for Jacobi GPU CUDAFOR: ", real(endc-startc, dp)/rate*1000, "ms"
   call test_array(A_cufor,A,N)
 #endif
 !
@@ -232,46 +189,7 @@ contains
     end do
   end subroutine test_array_cuda
 
-  subroutine jacobi_CPU(A, Anew, N, tol , iter_max)
-    real(dp), intent(inout), allocatable :: A(:,:)
-    real(dp), intent(inout), allocatable :: Anew(:,:)
-    integer,  intent(in)                 :: N
-    real(dp), intent(in)                 :: tol
-    integer,  intent(in)                 :: iter_max
-
-    integer i, j, iter,k
-    real(dp) :: err
-    do iter=1,iter_max
-
-       do j = 2, N-1
-          do i = 2, N-1
-             Anew(i, j) = 0.25 * (A(i, j+1) + A(i, j-1) + A(i+1, j) + A(i-1, j))
-          end do
-       end do
-
-       do j = 2, N-1
-          do i = 2, N-1
-             A(i, j) = Anew(i, j)
-          end do
-       end do
-
-    enddo
-  end subroutine jacobi_CPU
- 
-  subroutine jacobi_CPU_opt2(Tab_pointer1, Tab_pointer2, N)
-    real(dp), pointer                    :: Tab_pointer1(:,:)
-    real(dp), pointer                    :: Tab_pointer2(:,:)
-    integer,  intent(in)                 :: N
-    integer i, j
-
-       do j = 2, N-1
-          do i = 2, N-1
-             Tab_pointer2(i, j) = 0.25 * (Tab_pointer1(i, j+1) + Tab_pointer1(i, j-1) + Tab_pointer1(i+1, j) + Tab_pointer1(i-1, j))
-          end do
-       end do
-  end subroutine jacobi_CPU_opt2
-
-  subroutine jacobi_CPU_opt(Tab, TabNew, N)
+  subroutine jacobi_CPU(Tab, TabNew, N)
     real(dp), intent(in)       :: Tab(N,N)
     real(dp), intent(inout)    :: TabNew(N,N)
     integer,  intent(in)       :: N
@@ -283,9 +201,9 @@ contains
        end do
     end do
 
-  end subroutine jacobi_CPU_opt
+  end subroutine jacobi_CPU
   
-  subroutine jacobi_offload_opt(Tab, TabNew, N)
+  subroutine jacobi_offload(Tab, TabNew, N)
     real(dp), intent(in)       :: Tab(N,N)
     real(dp), intent(inout)    :: TabNew(N,N)
     integer,  intent(in)       :: N
@@ -299,76 +217,9 @@ contains
     end do
 !$omp end target teams distribute parallel do simd
 
-  end subroutine jacobi_offload_opt
-
-  subroutine jacobi_offload(Tab_omp, Tabnew_omp, N, tol , iter_max)
-    integer,  intent(in)    :: N
-    real(dp), intent(inout) :: Tab_omp(N,N)
-    real(dp), intent(inout) :: Tabnew_omp(N,N)
-    real(dp), intent(in)    :: tol
-    integer,  intent(in)    :: iter_max
-
-    integer i, j, iter,k
-    real(dp) :: err
-
-    do iter=1,iter_max
-!$omp target teams distribute parallel do simd collapse(2) 
-       do j = 2, N-1
-          do i = 2, N-1
-             Tabnew_omp(i, j) = 0.25 * (Tab_omp(i, j+1) + Tab_omp(i, j-1) + Tab_omp(i+1, j) + Tab_omp(i-1, j))
-          end do
-       end do
-!$omp end target teams distribute parallel do simd
-
-!$omp target teams distribute parallel do simd collapse(2) 
-       do j = 2, N-1
-          do i = 2, N-1
-             Tab_omp(i, j) = Tabnew_omp(i, j)
-          end do
-       end do
-!$omp end target teams distribute parallel do simd
-    enddo
- 
   end subroutine jacobi_offload
 
-
-  subroutine jacobi_openmp(Tab_omp, Tabnew_omp, N, tol , iter_max)
-    integer,  intent(in)    :: N
-    real(dp), intent(inout) :: Tab_omp(N,N)
-    real(dp), intent(inout) :: Tabnew_omp(N,N)
-    real(dp), intent(in)    :: tol
-    integer,  intent(in)    :: iter_max
-
-    integer i, j, iter,k
-    real(dp) :: err
-
-    do iter=1,iter_max
-!$omp parallel
-!$omp do 
-       do j = 2, N-1
-!$omp simd
-          do i = 2, N-1
-             Tabnew_omp(i, j) = 0.25 * (Tab_omp(i, j+1) + Tab_omp(i, j-1) + Tab_omp(i+1, j) + Tab_omp(i-1, j))
-          end do
-!$omp end simd
-       end do
-!$omp end do
-
-!$omp do 
-       do j = 2, N-1
-!$omp simd
-          do i = 2, N-1
-             Tab_omp(i, j) = Tabnew_omp(i, j)
-          end do
-!$omp end simd
-       end do
-!$omp end do
-!$omp end parallel
-    enddo
- 
-  end subroutine jacobi_openmp
-
-  subroutine jacobi_openmp_opt(Tab, Tabnew, N, tol , iter_max)
+  subroutine jacobi_openmp(Tab, Tabnew, N, tol , iter_max)
     real(dp), intent(inout),target       :: Tab(N,N)
     real(dp), intent(inout), target      :: TabNew(N,N)
     real(dp), pointer                    :: Tab_pointer1(:,:)
@@ -396,24 +247,7 @@ contains
        call swap(Tab_pointer1,Tab_pointer2)
     enddo
     
-  end subroutine jacobi_openmp_opt
-
-
-  subroutine swap2(Tab_pointer1,Tab_pointer2,Tab,TabNew,iter,N)
-    real(dp), pointer, intent(inout)  :: Tab_pointer1(:,:)
-    real(dp), pointer, intent(inout)  :: Tab_pointer2(:,:)
-    real(dp), intent(inout), target   :: Tab(N,N)
-    real(dp), intent(inout), target   :: TabNew(N,N)
-    integer,  intent(in)              :: iter,N
-    if (mod(iter,2).eq.1) then
-       Tab_pointer1 => TabNew
-       Tab_pointer2 => Tab
-    else
-       Tab_pointer2 => TabNew
-       Tab_pointer1 => Tab
-    endif
-
-  end subroutine swap2
+  end subroutine jacobi_openmp
   subroutine swap(Tab_pointer1,Tab_pointer2)
     real(dp), pointer, intent(inout)  :: Tab_pointer1(:,:)
     real(dp), pointer, intent(inout)  :: Tab_pointer2(:,:)
