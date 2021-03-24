@@ -41,7 +41,7 @@ module jacobi_cufor
   xindex=mod(index-1,nx)+1
   end function
 
-  attributes(device) real function yindex(index,nx)
+  attributes(device) integer function yindex(index,nx)
   integer :: index,nx
   yindex=(index-1)/nx+1
   end function
