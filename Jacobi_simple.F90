@@ -12,10 +12,11 @@ use jacobi_cufor
 #ifdef BW
 use bw_cufor
 #endif
+use omp_lib
   implicit none
 
   integer,  parameter :: iter_max = 10
-  integer,  parameter :: N = 8*1024
+  integer,  parameter :: N = 4*1024
   integer             ::  i,j,iterk,istat
   real(dp), parameter :: tol = 1.0e-2_dp
   
@@ -29,7 +30,7 @@ use bw_cufor
   integer, parameter :: threadsPerBlock=256
   integer :: numBlocks
 #endif
-  real(dp) :: rate
+  real(dp) :: rate,startomp,endomp,startcpu,endcpu
   integer(di)  :: startc, endc
   logical :: isDevice
 #ifdef BW
@@ -115,12 +116,18 @@ use bw_cufor
   A_pointer2 => Anew_omp
   !$omp target enter data map(to: A_omp, Anew_omp)
   call system_clock(startc)
+  call cpu_time(startcpu)
+  startomp=omp_get_wtime()
   do iterk=1,iter_max
      call jacobi_offload(A_pointer1, A_pointer2, N)
      call swap(A_pointer1,A_pointer2)
   enddo
+  endomp=omp_get_wtime()
+  call cpu_time(endcpu)
   call system_clock(endc)
   write(*,*) "timing for Jacobi GPU openmp: ", real(endc-startc, dp)/rate*1000, "ms"
+  write(*,*) "timing for Jacobi GPU openmp timeomp: ", (endomp-startomp)*1000, "ms"
+  write(*,*) "timing for Jacobi GPU openmp timecpu: ", (endcpu-startcpu)*1000, "ms"
   !$omp target update from(A_omp)  
   call test_array(A_omp,A,N)
 #endif
