@@ -12,6 +12,7 @@ use jacobi_cufor
 #ifdef BW
 use bw_cufor
 #endif
+  use omp_lib
   implicit none
 
   integer,  parameter :: iter_max = 10
@@ -108,21 +109,68 @@ use bw_cufor
   write(*,*) "timing for Jacobi CPU openmp: ", real(endc-startc, dp)/rate*1000, "ms"
   call test_array(A_omp,A,N)
 
-! Jacobi openmp offload
+ ! Jacobi openmp offload constrained
   call init_array(A_omp, N, 7.0_dp)
   call init_array(Anew_omp, N, 7.0_dp)
-  A_pointer1 => A_omp
-  A_pointer2 => Anew_omp
-  !$omp target enter data map(to: A_omp, Anew_omp)
   call system_clock(startc)
-  do iterk=1,iter_max
-     call jacobi_offload(A_pointer1, A_pointer2, N)
-     call swap(A_pointer1,A_pointer2)
-  enddo
+  call jacobi_offload_constrained(A_omp, Anew_omp, N, iter_max)
   call system_clock(endc)
-  write(*,*) "timing for Jacobi GPU openmp: ", real(endc-startc, dp)/rate*1000, "ms"
-  !$omp target update from(A_omp)  
+  write(*,*) "timing for Jacobi GPU openmp constrained: ", real(endc-startc, dp)/rate*1000, "ms"
   call test_array(A_omp,A,N)
+
+
+! Jacobi openmp offload MARCONI false
+  call init_array(A_omp, N, 7.0_dp)
+  call init_array(Anew_omp, N, 7.0_dp)
+  call system_clock(startc)
+  call jacobi_offload_marconi_false(A_omp, Anew_omp, N, iter_max)
+  call system_clock(endc)
+  write(*,*) "timing for Jacobi GPU openmp MARCONI false: ", real(endc-startc, dp)/rate*1000, "ms"
+  call test_array(A_omp,A,N)
+
+! Jacobi openmp offload MARCONI
+  call init_array(A_omp, N, 7.0_dp)
+  call init_array(Anew_omp, N, 7.0_dp)
+  call system_clock(startc)
+  call jacobi_offload_marconi(A_omp, Anew_omp, N, iter_max)
+  call system_clock(endc)
+  write(*,*) "timing for Jacobi GPU openmp MARCONI: ", real(endc-startc, dp)/rate*1000, "ms"
+  call test_array(A_omp,A,N)
+
+ ! Jacobi openmp offload
+   call init_array(A_omp, N, 7.0_dp)
+   call init_array(Anew_omp, N, 7.0_dp)
+   A_pointer1 => A_omp
+   A_pointer2 => Anew_omp
+   !$omp target enter data map(to: A_omp, Anew_omp)
+   call system_clock(startc)
+   do iterk=1,iter_max
+      call jacobi_offload(A_pointer1, A_pointer2, N)
+      call swap(A_pointer1,A_pointer2)
+   enddo
+   call system_clock(endc)
+   write(*,*) "timing for Jacobi GPU openmp: ", real(endc-startc, dp)/rate*1000, "ms"
+   !$omp target update from(A_omp)  
+   call test_array(A_omp,A,N)
+
+
+ ! Jacobi openmp offload without pointer
+   call init_array(A_omp, N, 7.0_dp)
+   call init_array(Anew_omp, N, 7.0_dp)
+   !$omp target update to(A_omp,Anew_omp)  
+   call system_clock(startc)
+   do iterk=1,iter_max
+     if (mod(iterk,2).eq.1) then
+      call jacobi_offload(A_omp, Anew_omp, N)
+     else
+      call jacobi_offload(Anew_omp, A_omp, N)
+     endif
+   enddo
+   call system_clock(endc)
+   write(*,*) "timing for Jacobi GPU openmp without pointer: ", real(endc-startc, dp)/rate*1000, "ms"
+   !$omp target update from(A_omp)  
+   call test_array(A_omp,A,N)
+
 #endif
 !
 ! Jacobi cudafor 
@@ -246,6 +294,88 @@ contains
 !$omp end target teams distribute parallel do simd
 
   end subroutine jacobi_offload
+
+
+  subroutine jacobi_offload_marconi_false(Tab, TabNew, N,iter_max)
+    real(dp), intent(in)       :: Tab(N,N)
+    real(dp), intent(inout)    :: TabNew(N,N)
+    integer,  intent(in)       :: N,iter_max
+    integer                    :: i, j, iterk
+
+    integer nteams, nthreads
+
+    isDevice = omp_is_initial_device()
+    if (isDevice) then
+       write(*,*) "we are on the GPU"
+       !$omp target teams defaultmap(tofrom:scalar)
+       nteams = omp_get_num_teams();
+       !$omp parallel
+       !$omp single
+       nthreads = omp_get_num_threads();
+       !$omp end single
+       !$omp end parallel
+       !$omp end target teams 
+    else
+       write(*,*) "we are on the CPU"
+    endif
+    write(*,*) "number of teams = ",nteams
+    write(*,*) "number of threads = ",nthreads
+
+    !$omp target data map(Tab) map(alloc: TabNew)
+    do iterk=1,iter_max
+       !$omp target teams distribute parallel do simd collapse(2) 
+       do j = 2, N-1
+          do i = 2, N-1
+             TabNew(i, j) = 0.25 * (Tab(i, j+1) + Tab(i, j-1) + Tab(i+1, j) + Tab(i-1, j))
+          end do
+       end do
+       !$omp end target teams distribute parallel do simd
+    enddo
+    !$omp end target data
+
+  end subroutine jacobi_offload_marconi_false
+
+  subroutine jacobi_offload_marconi(Tab, TabNew, N,iter_max)
+    real(dp), intent(in),target       :: Tab(N,N)
+    real(dp), intent(inout),target    :: TabNew(N,N)
+    integer,  intent(in)       :: N,iter_max
+    integer                    :: i, j, iterk
+    real(dp), pointer                    :: Tab_pointer1(:,:)
+    real(dp), pointer                    :: Tab_pointer2(:,:)
+    Tab_pointer1 => Tab
+    Tab_pointer2 => TabNew
+
+    !$omp target data map(Tab) map(alloc: TabNew) 
+    do iterk=1,iter_max
+       !$omp target teams distribute parallel do simd collapse(2) map(to:Tab_pointer1,Tab_pointer2)
+       do j = 2, N-1
+          do i = 2, N-1
+             Tab_pointer2(i, j) = 0.25 * (Tab_pointer1(i, j+1) + Tab_pointer1(i, j-1) + Tab_pointer1(i+1, j) + Tab_pointer1(i-1, j))
+          end do
+       end do
+       !$omp end target teams distribute parallel do simd
+       call swap(Tab_pointer1,Tab_pointer2)
+    enddo
+    !$omp end target data
+
+  end subroutine jacobi_offload_marconi
+
+  subroutine jacobi_offload_constrained(Tab, TabNew, N,iter_max)
+    real(dp), intent(in),target       :: Tab(N,N)
+    real(dp), intent(inout),target    :: TabNew(N,N)
+    integer,  intent(in)       :: N,iter_max
+    integer                    :: i, j, iterk
+
+    do iterk=1,iter_max
+       !$omp target teams distribute parallel do simd collapse(2)
+       do j = 2, N-1
+          do i = 2, N-1
+             TabNew(i, j) = 0.25 * (Tab(i, j+1) + Tab(i, j-1) + Tab(i+1, j) + Tab(i-1, j))
+          end do
+       end do
+       !$omp end target teams distribute parallel do simd
+    enddo
+  end subroutine jacobi_offload_constrained
 
   subroutine jacobi_openmp(Tab, Tabnew, N, tol , iter_max)
     real(dp), intent(inout),target       :: Tab(N,N)
