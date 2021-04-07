@@ -20,6 +20,7 @@ use omp_lib
   real(dp), allocatable,managed,target :: A_cufor(:, :), Anew_cufor(:, :)
   integer, parameter :: threadsPerBlock=256
   integer :: numBlocks
+  type(dim3) :: dimGrid, dimBlock
 #endif
   real(dp) :: rate
   integer(di)  :: startc, endc
@@ -103,6 +104,27 @@ use omp_lib
   call test_array(A_cufor,A,N)
 #endif
 !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! Jacobi cudafortran 2D blocks with pointer 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#ifdef CUDAFOR
+  call init_array(A_cufor, N, 7.0_dp)
+  call init_array(Anew_cufor, N, 7.0_dp)
+  dimBlock = dim3(16,16,1)
+  dimGrid = dim3(ceiling(real(N)/dimBlock%x), ceiling(real(N)/dimBlock%y), 1)
+  Acufor_pointer1 => A_cufor
+  Acufor_pointer2 => Anew_cufor
+  call system_clock(startc)
+  do iterk=1,iter_max
+     call jacobiDevice2d<<<dimGrid,dimBlock>>>(Acufor_pointer1, Acufor_pointer2, N)
+     call swap(Acufor_pointer1,Acufor_pointer2)
+  enddo
+  istat = cudaDeviceSynchronize()
+  call system_clock(endc)
+  write(*,*) "timing for Jacobi with pointer GPU CUDAFOR 2D blocks: ", real(endc-startc, dp)/rate*1000, "ms"
+  call test_array(A_cufor,A,N)
+#endif
+!
 contains
 
 
@@ -179,6 +201,21 @@ module jacobi_cufor
       index = blockDim%x*(blockIdx%x-1)+threadIdx%x
       ind1=xindex(index,N)
       ind2=yindex(index,N)
+      if ((ind2.NE.1).AND.(ind2.NE.N).AND.(ind1.NE.1).AND.(ind1.NE.N).AND.(index.LE.(N*N))) then
+         Anew_cufor(ind1,ind2) = A_cufor(ind1,ind2-1) + A_cufor(ind1,ind2+1) + A_cufor(ind1-1,ind2) + A_cufor(ind1+1,ind2)
+         Anew_cufor(ind1,ind2) = Anew_cufor(ind1,ind2) * 0.25
+      endif
+
+  end subroutine
+
+  attributes(global) subroutine jacobiDevice2d(A_cufor,Anew_cufor,N)
+      integer, value     :: N
+      real(dp), managed  :: A_cufor(N,N)
+      real(dp), managed  :: Anew_cufor(N,N)
+      integer            :: ind1,ind2
+       
+      ind1 = blockDim%x*(blockIdx%x-1)+threadIdx%x
+      ind2 = blockDim%y*(blockIdx%y-1)+threadIdx%y
       if ((ind2.NE.1).AND.(ind2.NE.N).AND.(ind1.NE.1).AND.(ind1.NE.N).AND.(index.LE.(N*N))) then
          Anew_cufor(ind1,ind2) = A_cufor(ind1,ind2-1) + A_cufor(ind1,ind2+1) + A_cufor(ind1-1,ind2) + A_cufor(ind1+1,ind2)
          Anew_cufor(ind1,ind2) = Anew_cufor(ind1,ind2) * 0.25
