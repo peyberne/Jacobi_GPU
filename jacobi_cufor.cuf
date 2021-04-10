@@ -5,8 +5,8 @@ module jacobi_cufor
 
   attributes(global) subroutine jacobiDevice(A_cufor,Anew_cufor,N)
       integer, value     :: N
-      real(dp), managed  :: A_cufor(N,N)
-      real(dp), managed  :: Anew_cufor(N,N)
+      real(dp)           :: A_cufor(N,N)
+      real(dp)           :: Anew_cufor(N,N)
       integer            :: index,ind1,ind2
        
       index = blockDim%x*(blockIdx%x-1)+threadIdx%x
@@ -19,10 +19,25 @@ module jacobi_cufor
 
   end subroutine
 
+  attributes(global) subroutine jacobiDevice2d(A_cufor,Anew_cufor,N)
+      integer, value     :: N
+      real(dp)           :: A_cufor(N,N)
+      real(dp)           :: Anew_cufor(N,N)
+      integer            :: ind1,ind2
+       
+      ind1 = blockDim%x*(blockIdx%x-1)+threadIdx%x
+      ind2 = blockDim%y*(blockIdx%y-1)+threadIdx%y
+      if ((ind2.NE.1).AND.(ind2.NE.N).AND.(ind1.NE.1).AND.(ind1.NE.N).AND.(index.LE.(N*N))) then
+         Anew_cufor(ind1,ind2) = A_cufor(ind1,ind2-1) + A_cufor(ind1,ind2+1) + A_cufor(ind1-1,ind2) + A_cufor(ind1+1,ind2)
+         Anew_cufor(ind1,ind2) = Anew_cufor(ind1,ind2) * 0.25
+      endif
+
+  end subroutine
+
   attributes(global) subroutine setValuesDevice(A_cufor,Anew_cufor,N)
       integer, value     :: N
-      real(dp), managed  :: A_cufor(N,N)
-      real(dp), managed  :: Anew_cufor(N,N)
+      real(dp)           :: A_cufor(N,N)
+      real(dp)           :: Anew_cufor(N,N)
       integer            :: index,ind1,ind2
       
        

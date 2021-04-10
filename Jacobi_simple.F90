@@ -26,8 +26,11 @@ use omp_lib
   real(dp), pointer             :: A_pointer1(:,:)
   real(dp), pointer             :: A_pointer2(:,:)
 #ifdef CUDAFOR
-  real(dp), allocatable,managed :: A_cufor(:, :), Anew_cufor(:, :)
+  real(dp), allocatable,managed,target :: A_cufor(:, :), Anew_cufor(:, :)
+  real(dp), managed, pointer    :: Acufor_pointer1(:,:)
+  real(dp), managed, pointer    :: Acufor_pointer2(:,:)
   integer, parameter :: threadsPerBlock=256
+  type(dim3) :: dimGrid, dimBlock
   integer :: numBlocks
 #endif
   real(dp) :: rate,startomp,endomp,startcpu,endcpu
@@ -134,6 +137,9 @@ use omp_lib
 !
 ! Jacobi cudafor 
 #ifdef CUDAFOR
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! Jacobi cudafortran without pointer 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   allocate(A_cufor(N,N))
   allocate(Anew_cufor(N,N))
   call init_array(A_cufor, N, 7.0_dp)
@@ -151,6 +157,45 @@ use omp_lib
   call system_clock(endc)
   write(*,*) "timing for Jacobi GPU CUDAFOR: ", real(endc-startc, dp)/rate*1000, "ms"
   call test_array(A_cufor,A,N)
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! Jacobi cudafortran with pointer 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  call init_array(A_cufor, N, 7.0_dp)
+  call init_array(Anew_cufor, N, 7.0_dp)
+!  numBlocks=((N*N+threadsPerBlock-1)/threadsPerBlock)
+  numBlocks=ceiling(real(N*N)/threadsPerBlock)
+  Acufor_pointer1 => A_cufor
+  Acufor_pointer2 => Anew_cufor
+  call system_clock(startc)
+  do iterk=1,iter_max
+     call jacobiDevice<<<numBlocks,threadsPerBlock>>>(Acufor_pointer1, Acufor_pointer2, N)
+     call swap(Acufor_pointer1,Acufor_pointer2)
+  enddo
+  istat = cudaDeviceSynchronize()
+  call system_clock(endc)
+  write(*,*) "timing for Jacobi with pointer GPU CUDAFOR: ", real(endc-startc, dp)/rate*1000, "ms"
+  call test_array(A_cufor,A,N)
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! Jacobi cudafortran 2D blocks with pointer 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  call init_array(A_cufor, N, 7.0_dp)
+  call init_array(Anew_cufor, N, 7.0_dp)
+  dimBlock = dim3(16,16,1)
+  dimGrid = dim3(ceiling(real(N)/dimBlock%x), ceiling(real(N)/dimBlock%y), 1)
+  Acufor_pointer1 => A_cufor
+  Acufor_pointer2 => Anew_cufor
+  call system_clock(startc)
+  do iterk=1,iter_max
+     call jacobiDevice2d<<<dimGrid,dimBlock>>>(Acufor_pointer1, Acufor_pointer2, N)
+     call swap(Acufor_pointer1,Acufor_pointer2)
+  enddo
+  istat = cudaDeviceSynchronize()
+  call system_clock(endc)
+  write(*,*) "timing for Jacobi with pointer GPU CUDAFOR 2D blocks: ", real(endc-startc, dp)/rate*1000, "ms"
+  call test_array(A_cufor,A,N)
+!
 #endif
 !
 contains
